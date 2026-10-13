@@ -23,7 +23,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [services, setServices] = useState<Service[]>([])
-  const [categories, setCategories] = useState<Array<{id:string;nome:string;emoji?:string}>>([])
+  const [categories, setCategories] = useState<Array<{id:string;nombre:string;emoji?:string}>>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [isSignup, setIsSignup] = useState(false)
@@ -43,7 +43,7 @@ export default function App() {
       supabase.from('categorias').select('id,nombre,emoji').eq('activa', true).order('nombre').limit(30),
     ])
     setServices((serviceResult.data ?? []) as unknown as Service[])
-    setCategories((categoryResult.data ?? []) as Array<{id:string;nome:string;emoji?:string}>)
+    setCategories((categoryResult.data ?? []) as Array<{id:string;nombre:string;emoji?:string}>)
     if (activeSession) {
       const result = await supabase.from('usuarios').select('id,nombre,apellido,email,tipo,foto_url').eq('auth_id', activeSession.user.id).maybeSingle()
       setProfile((result.data as Profile | null) ?? null)
