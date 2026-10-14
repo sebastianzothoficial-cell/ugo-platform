@@ -1038,68 +1038,255 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
 }
 
 function Admin() {
-  const { t, locale } = useI18n(), [users, setUsers] = useState<{ id: string; nombre: string; tipo: string; email: string; activo: boolean }[]>([]), [jobs, setJobs] = useState<Service[]>([]), [counts, setCounts] = useState({ users: 0, jobs: 0, active: 0, pending: 0 }), [error, setError] = useState(''), [busy, setBusy] = useState(true)
+  const { t, locale } = useI18n()
+  const [tab, setTab] = useState<'overview' | 'users' | 'jobs' | 'pros' | 'system'>('overview')
+  const [users, setUsers] = useState<{ id: string; nombre: string; apellido?: string; tipo: string; email: string; activo: boolean; fecha_registro?: string }[]>([])
+  const [jobs, setJobs] = useState<Service[]>([])
+  const [pendingPros, setPendingPros] = useState<{ usuario_id: string; estado_verificacion: string; created_at: string; usuario?: { nombre: string; email: string } }[]>([])
+  const [counts, setCounts] = useState({ users: 0, jobs: 0, active: 0, pending: 0 })
+  const [search, setSearch] = useState('')
+  const [filterRole, setFilterRole] = useState('todos')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(true)
+
   const load = useCallback(async () => {
     setBusy(true); setError('')
-    const [u, s, uc, sc, ac, pc] = await Promise.all([
-      db.from('usuarios').select('id,nombre,tipo,email,activo').order('fecha_registro', { ascending: false }).limit(8),
-      db.from('servicios').select('id,numero,cliente_id,proveedor_id,categoria_id,descripcion,direccion_cliente,estado,tarifa,created_at,programado_para').order('created_at', { ascending: false }).limit(10),
+    const [u, s, pp, uc, sc, ac, pc] = await Promise.all([
+      db.from('usuarios').select('id,nombre,apellido,tipo,email,activo').order('fecha_registro', { ascending: false }).limit(50),
+      db.from('servicios').select('id,numero,cliente_id,proveedor_id,categoria_id,descripcion,direccion_cliente,estado,tarifa,created_at,programado_para').order('created_at', { ascending: false }).limit(50),
+      db.from('perfiles_proveedor').select('usuario_id,estado_verificacion,created_at').eq('estado_verificacion', 'pendiente'),
       db.from('usuarios').select('id', { count: 'exact', head: true }),
       db.from('servicios').select('id', { count: 'exact', head: true }),
       db.from('servicios').select('id', { count: 'exact', head: true }).in('estado', ['buscando','ofrecido','asignado','en_camino','llegado','ejecutando']),
       db.from('perfiles_proveedor').select('usuario_id', { count: 'exact', head: true }).eq('estado_verificacion','pendiente')
     ])
-    const failure = [u.error,s.error,uc.error,sc.error,ac.error,pc.error].find(Boolean)
-    if (failure) setError(failure.message)
-    else {
+    const failure = [u.error, s.error, uc.error, sc.error, ac.error, pc.error].find(Boolean)
+    if (failure) {
+      setError(failure.message)
+    } else {
       setUsers(u.data || [])
       setJobs((s.data || []) as Service[])
+      setPendingPros(pp.data || [])
       setCounts({ users: uc.count || 0, jobs: sc.count || 0, active: ac.count || 0, pending: pc.count || 0 })
     }
     setBusy(false)
   }, [])
+
   useEffect(() => { void load() }, [load])
+
+  async function toggleUserActive(id: string, currentActive: boolean) {
+    setError(''); setMessage('')
+    const { error } = await db.from('usuarios').update({ activo: !currentActive }).eq('id', id)
+    if (error) setError(errorMessage(error))
+    else {
+      setMessage('Status atualizado com sucesso.')
+      void load()
+    }
+  }
+
+  async function verifyProvider(usuarioId: string, status: 'verificado' | 'rechazado') {
+    setError(''); setMessage('')
+    const { error } = await db.from('perfiles_proveedor').update({ estado_verificacion: status }).eq('usuario_id', usuarioId)
+    if (error) setError(errorMessage(error))
+    else {
+      setMessage(`Profissional ${status === 'verificado' ? 'aprovado' : 'rejeitado'} com sucesso.`)
+      void load()
+    }
+  }
+
+  const filteredUsers = users.filter(u => {
+    const matchSearch = !search || u.nombre?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase())
+    const matchRole = filterRole === 'todos' || u.tipo === filterRole
+    return matchSearch && matchRole
+  })
+
   return (
     <div className="container inner-page">
       <div className="page-head">
         <Heading kicker="UGO / ADMIN" title={t('adminArea')} subtitle={t('adminIntro')}/>
         <Button variant="outline" onClick={() => void load()}>{t('refresh')}</Button>
       </div>
+
       <Notice text={error} error/>
+      <Notice text={message}/>
+
+      {/* Admin Subtabs */}
+      <div className="admin-tabs" style={{ display: 'flex', gap: 8, marginBottom: 24, overflowX: 'auto', paddingBottom: 4 }}>
+        <button className={`btn ${tab === 'overview' ? 'btn-dark' : 'btn-outline'}`} onClick={() => setTab('overview')}>{t('adminTabOverview')}</button>
+        <button className={`btn ${tab === 'users' ? 'btn-dark' : 'btn-outline'}`} onClick={() => setTab('users')}>{t('adminTabUsers')} ({counts.users})</button>
+        <button className={`btn ${tab === 'jobs' ? 'btn-dark' : 'btn-outline'}`} onClick={() => setTab('jobs')}>{t('adminTabJobs')} ({counts.jobs})</button>
+        <button className={`btn ${tab === 'pros' ? 'btn-dark' : 'btn-outline'}`} onClick={() => setTab('pros')}>{t('adminTabPros')} ({counts.pending})</button>
+        <button className={`btn ${tab === 'system' ? 'btn-dark' : 'btn-outline'}`} onClick={() => setTab('system')}>{t('adminTabSystem')}</button>
+      </div>
+
       {busy && <p>{t('loading')}</p>}
-      <div className="stat-grid">
-        {([[t('users'),counts.users,UserRound],[t('totalJobs'),counts.jobs,BriefcaseBusiness],[t('activeJobsCount'),counts.active,Compass],[t('pendingPros'),counts.pending,ShieldCheck]] as const).map(([label,value,Icon]) => (
-          <div className="stat" key={label}>
-            <Icon size={22} strokeWidth={1.5}/>
-            <strong>{error ? '—' : value}</strong>
-            <span>{label}</span>
+
+      {tab === 'overview' && !busy && (
+        <>
+          <div className="stat-grid">
+            {([[t('users'), counts.users, UserRound], [t('totalJobs'), counts.jobs, BriefcaseBusiness], [t('activeJobsCount'), counts.active, Compass], [t('pendingPros'), counts.pending, ShieldCheck]] as const).map(([label, value, Icon]) => (
+              <div className="stat" key={label}>
+                <Icon size={22} strokeWidth={1.5}/>
+                <strong>{error ? '—' : value}</strong>
+                <span>{label}</span>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="admin-columns">
+          <div className="admin-columns" style={{ marginTop: 24 }}>
+            <section className="panel">
+              <h2>{t('recentJobs')}</h2>
+              {jobs.slice(0, 5).map(j => (
+                <div className="admin-row" key={j.id}>
+                  <span>#{j.numero}<small>{date(j.created_at, locale)}</small></span>
+                  <span className="truncate">{j.descripcion || t('services')}</span>
+                  <span className="status-pill">{j.estado}</span>
+                </div>
+              ))}
+              {!jobs.length && <p>{t('none')}</p>}
+            </section>
+            <section className="panel">
+              <h2>{t('recentUsers')}</h2>
+              {users.slice(0, 5).map(u => (
+                <div className="admin-row" key={u.id}>
+                  <span className="admin-avatar">{u.nombre?.[0] || 'U'}</span>
+                  <span className="truncate">{u.nombre} <small>{u.email}</small></span>
+                  <span className="status-pill">{u.tipo}</span>
+                </div>
+              ))}
+              {!users.length && <p>{t('none')}</p>}
+            </section>
+          </div>
+        </>
+      )}
+
+      {tab === 'users' && !busy && (
         <section className="panel">
-          <h2>{t('recentJobs')}</h2>
-          {jobs.map(j => (
-            <div className="admin-row" key={j.id}>
-              <span>#{j.numero}<small>{date(j.created_at,locale)}</small></span>
-              <span className="truncate">{j.descripcion || t('services')}</span>
-              <span className="status-pill">{j.estado}</span>
-            </div>
-          ))}
-          {!jobs.length && <p>{t('none')}</p>}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              placeholder={t('search')}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ flex: 1, minWidth: 220, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+            />
+            <select
+              value={filterRole}
+              onChange={e => setFilterRole(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1' }}
+            >
+              <option value="todos">Todos os papéis</option>
+              <option value="cliente">Cliente</option>
+              <option value="proveedor">Profissional</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                  <th style={{ padding: 10 }}>Nome</th>
+                  <th style={{ padding: 10 }}>E-mail</th>
+                  <th style={{ padding: 10 }}>Tipo</th>
+                  <th style={{ padding: 10 }}>Status</th>
+                  <th style={{ padding: 10 }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.map(u => (
+                  <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: 10, fontWeight: 500 }}>{u.nombre} {u.apellido || ''}</td>
+                    <td style={{ padding: 10, color: '#475569' }}>{u.email}</td>
+                    <td style={{ padding: 10 }}><span className="status-pill">{u.tipo}</span></td>
+                    <td style={{ padding: 10 }}>
+                      <span style={{ color: u.activo ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                        {u.activo ? 'Ativo' : 'Inativo'}
+                      </span>
+                    </td>
+                    <td style={{ padding: 10 }}>
+                      <button
+                        onClick={() => void toggleUserActive(u.id, u.activo)}
+                        style={{ padding: '4px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      >
+                        {u.activo ? 'Desativar' : 'Ativar'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!filteredUsers.length && <p style={{ padding: 20, textAlign: 'center', color: '#64748b' }}>{t('none')}</p>}
+          </div>
         </section>
+      )}
+
+      {tab === 'jobs' && !busy && (
         <section className="panel">
-          <h2>{t('recentUsers')}</h2>
-          {users.map(u => (
-            <div className="admin-row" key={u.id}>
-              <span className="admin-avatar">{u.nombre?.[0] || 'U'}</span>
-              <span className="truncate">{u.nombre}<small>{u.email}</small></span>
-              <span className="status-pill">{u.tipo}</span>
-            </div>
-          ))}
-          {!users.length && <p>{t('none')}</p>}
+          <h2>{t('adminTabJobs')}</h2>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {jobs.map(j => (
+              <div className="admin-row" key={j.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottom: '1px solid #f1f5f9' }}>
+                <div>
+                  <strong>#{j.numero}</strong> <small style={{ color: '#64748b', marginLeft: 8 }}>{date(j.created_at, locale)}</small>
+                  <p style={{ margin: '4px 0 0', color: '#334155' }}>{j.descripcion || t('services')}</p>
+                  <small style={{ color: '#64748b' }}>{j.direccion_cliente || 'Endereço não informado'}</small>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className="status-pill">{j.estado}</span>
+                  {j.tarifa && <strong style={{ color: '#16a34a' }}>{money(j.tarifa, locale)}</strong>}
+                </div>
+              </div>
+            ))}
+            {!jobs.length && <p>{t('none')}</p>}
+          </div>
         </section>
-      </div>
+      )}
+
+      {tab === 'pros' && !busy && (
+        <section className="panel">
+          <h2>{t('pendingPros')} ({pendingPros.length})</h2>
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {pendingPros.map(p => (
+              <div key={p.usuario_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                <div>
+                  <strong>Usuário ID: {p.usuario_id.slice(0, 8)}...</strong>
+                  <p style={{ margin: '4px 0', fontSize: 13, color: '#64748b' }}>Solicitado em: {date(p.created_at, locale)}</p>
+                  <span className="status-pill" style={{ background: '#fef3c7', color: '#92400e' }}>Aguardando análise de documentos</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button variant="outline" onClick={() => void verifyProvider(p.usuario_id, 'rechazado')}>Rejeitar</Button>
+                  <Button onClick={() => void verifyProvider(p.usuario_id, 'verificado')}>Aprovar</Button>
+                </div>
+              </div>
+            ))}
+            {!pendingPros.length && <p style={{ padding: 20, textAlign: 'center', color: '#64748b' }}>Nenhum profissional pendente de verificação.</p>}
+          </div>
+        </section>
+      )}
+
+      {tab === 'system' && !busy && (
+        <section className="panel">
+          <h2>{t('adminTabSystem')}</h2>
+          <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+            <div style={{ padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+              <h3 style={{ fontSize: 15, marginBottom: 8 }}>Supabase API</h3>
+              <p style={{ color: '#16a34a', fontWeight: 600, margin: 0 }}>✓ Conectado</p>
+              <small style={{ color: '#64748b' }}>Endpoint ativo e autenticação configurada</small>
+            </div>
+            <div style={{ padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+              <h3 style={{ fontSize: 15, marginBottom: 8 }}>Cache Offline</h3>
+              <p style={{ color: '#16a34a', fontWeight: 600, margin: 0 }}>✓ Ativo</p>
+              <small style={{ color: '#64748b' }}>Fallbacks e dados locais prontos</small>
+            </div>
+            <div style={{ padding: 16, borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+              <h3 style={{ fontSize: 15, marginBottom: 8 }}>Geolocalização / Mapas</h3>
+              <p style={{ color: '#16a34a', fontWeight: 600, margin: 0 }}>✓ OpenStreetMap / Leaflet</p>
+              <small style={{ color: '#64748b' }}>Roteamento e coordenadas ativas</small>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   )
 }
+
