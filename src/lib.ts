@@ -32,7 +32,7 @@ export function errorMessage(value: unknown): string {
   }
   return str
 }
-export function money(value: number | null | undefined, locale: string) { return value == null ? '—' : new Intl.NumberFormat(locale, { style: 'currency', currency: 'BRL' }).format(value) }
+export function money(value: number | null | undefined, locale: string) { return value == null ? '—' : new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(value) }
 export function date(value: string, locale: string) { return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
 export function coordinates(): Promise<{ lat: number; lng: number; accuracy: number; captured: string }> {
   return new Promise((resolve, reject) => {
