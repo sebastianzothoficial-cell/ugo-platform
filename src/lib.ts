@@ -16,6 +16,23 @@ export type Offer = { id: string; servicio_id: string; estado: string; tarifa_of
 export function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value) }
 export function money(value: number | null | undefined, locale: string) { return value == null ? '—' : new Intl.NumberFormat(locale, { style: 'currency', currency: 'BRL' }).format(value) }
 export function date(value: string, locale: string) { return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
+// crypto.randomUUID only exists in secure contexts, and the dev/preview server is often plain http.
+export function uid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const random = new Uint8Array(16)
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(random)
+  else for (let i = 0; i < random.length; i++) random[i] = Math.floor(Math.random() * 256)
+  random[6] = (random[6] & 0x0f) | 0x40
+  random[8] = (random[8] & 0x3f) | 0x80
+  const hex = Array.from(random, b => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+// Fallback for devices or browsers where MapLibre cannot start: the exact service address is never shared,
+// so the link only carries the approximate marker position.
+export function osmLink(lat: number | null, lng: number | null): string {
+  if (lat == null || lng == null) return 'https://www.openstreetmap.org'
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=14/${lat}/${lng}`
+}
 export function coordinates(): Promise<{ lat: number; lng: number; accuracy: number; captured: string }> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) { reject(new Error('GPS indisponível neste dispositivo.')); return }
