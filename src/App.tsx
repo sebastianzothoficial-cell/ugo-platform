@@ -534,20 +534,114 @@ function Auth({ onSuccess }: { onSuccess: () => void }) {
 }
 
 function Account({ profile, refresh }: { profile: Profile; refresh: () => void }) {
-  const { t, locale } = useI18n(), [name, setName] = useState(profile.nombre || ''), [surname, setSurname] = useState(profile.apellido || ''), [phone, setPhone] = useState(profile.telefono || ''), [address, setAddress] = useState(''), [city, setCity] = useState(''), [neighborhood, setNeighborhood] = useState(profile.zona || ''), [terms, setTerms] = useState(false), [isOnboarded, setOnboarded] = useState(false), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('')
-  useEffect(() => { if (profile.tipo !== 'cliente') return; let live = true; void db.from('perfiles_cliente').select('direccion,ciudad,barrio,telefono,onboarding_completo_at').eq('usuario_id', profile.id).maybeSingle().then(({ data, error }) => { if (!live) return; if (error) setError(error.message); if (data) { setAddress(data.direccion || ''); setCity(data.ciudad || ''); setNeighborhood(data.barrio || ''); setPhone(data.telefono || profile.telefono || ''); setOnboarded(!!data.onboarding_completo_at) } }); return () => { live = false } }, [profile])
-  async function submit(e: FormEvent) { e.preventDefault(); setBusy(true); setMessage(''); setError(''); try {
-    if (profile.tipo === 'cliente') {
-      if (!isOnboarded && !terms) throw new Error(t('acceptTerms'))
-      if (!/^\+?[\d\s()\-]{8,20}$/.test(phone.trim())) throw new Error(t('phone'))
-      const { error } = await db.rpc('completar_onboarding_cliente', { p_nombre: name.trim(), p_apellido: surname.trim(), p_telefono: phone.trim(), p_direccion: address.trim(), p_barrio: neighborhood.trim(), p_ciudad: city.trim(), p_idioma_preferido: locale, p_contacto_preferido: 'whatsapp', p_termos_versao: '2026-09-04' })
-      if (error) throw error; setOnboarded(true)
-    } else {
-      const { error } = await db.from('usuarios').update({ nombre: name.trim(), apellido: surname.trim() || null }).eq('id', profile.id); if (error) throw error
+  const { t, locale } = useI18n()
+  const [name, setName] = useState(profile.nombre || '')
+  const [surname, setSurname] = useState(profile.apellido || '')
+  const [phone, setPhone] = useState(profile.telefono || '')
+  const [address, setAddress] = useState('')
+  const [city, setCity] = useState('')
+  const [neighborhood, setNeighborhood] = useState(profile.zona || '')
+  const [terms, setTerms] = useState(false)
+  const [isOnboarded, setOnboarded] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [fotoUrl, setFotoUrl] = useState<string | null>(() => {
+    try { return localStorage.getItem(`ugo-client-photo-${profile.id}`) } catch { return null }
+  })
+
+  useEffect(() => {
+    if (profile.tipo !== 'cliente') return
+    let live = true
+    void db.from('perfiles_cliente').select('direccion,ciudad,barrio,telefono,onboarding_completo_at').eq('usuario_id', profile.id).maybeSingle().then(({ data, error }) => {
+      if (!live) return
+      if (error) setError(error.message)
+      if (data) {
+        setAddress(data.direccion || '')
+        setCity(data.ciudad || '')
+        setNeighborhood(data.barrio || '')
+        setPhone(data.telefono || profile.telefono || '')
+        setOnboarded(!!data.onboarding_completo_at)
+      }
+    })
+    return () => { live = false }
+  }, [profile])
+
+  async function uploadClientPhoto(file: File | undefined) {
+    if (!file) return
+    if (!['image/jpeg','image/png'].includes(file.type) || file.size > 5_000_000) {
+      setError('JPEG ou PNG · máximo 5 MB')
+      return
     }
-    refresh(); setMessage(t('saved'))
-  } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) } }
-  return <div className="container inner-page narrow"><Heading kicker="UGO / CONTA" title={t('profile')} subtitle={`${t('welcome')}, ${profile.nombre}.`}/><div className="panel"><div className="role-badge"><BadgeCheck size={16}/> {t(profile.tipo === 'cliente' ? 'client' : profile.tipo === 'proveedor' ? 'provider' : 'admin')}</div>{profile.tipo === 'cliente' && !isOnboarded && <Notice text={t('onboarding')}/>}<form className="form-grid" onSubmit={submit}><label>{t('firstName')}<input required minLength={2} maxLength={80} value={name} onChange={e => setName(e.target.value)}/></label><label>{t('lastName')}<input maxLength={80} value={surname} onChange={e => setSurname(e.target.value)}/></label>{profile.tipo === 'cliente' && <><label>{t('phone')}<input type="tel" required minLength={8} value={phone} onChange={e => setPhone(e.target.value)} autoComplete="tel"/></label><label>{t('city')}<input required value={city} onChange={e => setCity(e.target.value)} autoComplete="address-level2"/></label><label>{t('neighborhood')}<input value={neighborhood} onChange={e => setNeighborhood(e.target.value)}/></label><label>{t('addressShort')}<input required value={address} onChange={e => setAddress(e.target.value)} autoComplete="street-address"/></label>{!isOnboarded && <label className="check-field full"><input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} required/> {t('acceptTerms')}</label>}</>}<div className="form-footer full"><Button type="submit" disabled={busy}>{busy ? t('loading') : t('save')} <ArrowRight size={16}/></Button></div></form><Notice text={message}/><Notice text={error} error/></div><button className="logout-link" onClick={() => void db.auth.signOut().then(() => nav('home'))}><LogOut size={16}/> {t('logout')}</button></div>
+    setBusy(true); setError('')
+    try {
+      const ext = file.type === 'image/png' ? 'png' : 'jpg'
+      const path = `${profile.id}/client-photo-${Date.now()}.${ext}`
+      const { error: uploadError } = await db.storage.from('provider-kyc').upload(path, file, { upsert: true, contentType: file.type })
+      if (uploadError) throw uploadError
+      const { data: { publicUrl } } = db.storage.from('provider-kyc').getPublicUrl(path)
+      setFotoUrl(publicUrl)
+      try { localStorage.setItem(`ugo-client-photo-${profile.id}`, publicUrl) } catch {}
+      setMessage(t('saved'))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setBusy(true); setMessage(''); setError(''); try {
+      if (profile.tipo === 'cliente') {
+        if (!isOnboarded && !terms) throw new Error(t('acceptTerms'))
+        if (!/^\+?[\d\s()\-]{8,20}$/.test(phone.trim())) throw new Error(t('phone'))
+        const { error } = await db.rpc('completar_onboarding_cliente', { p_nombre: name.trim(), p_apellido: surname.trim(), p_telefono: phone.trim(), p_direccion: address.trim(), p_barrio: neighborhood.trim(), p_ciudad: city.trim(), p_idioma_preferido: locale, p_contacto_preferido: 'whatsapp', p_termos_versao: '2026-09-04' })
+        if (error) throw error; setOnboarded(true)
+      } else {
+        const { error } = await db.from('usuarios').update({ nombre: name.trim(), apellido: surname.trim() || null }).eq('id', profile.id); if (error) throw error
+      }
+      refresh(); setMessage(t('saved'))
+    } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="container inner-page narrow">
+      <Heading kicker="UGO / CONTA" title={t('profile')} subtitle={`${t('welcome')}, ${profile.nombre}.`}/>
+      <div className="panel">
+        <div className="role-badge"><BadgeCheck size={16}/> {t(profile.tipo === 'cliente' ? 'client' : profile.tipo === 'proveedor' ? 'provider' : 'admin')}</div>
+        {profile.tipo === 'cliente' && !isOnboarded && <Notice text={t('onboarding')}/>}
+
+        {profile.tipo === 'cliente' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, padding: 12, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#cbd5e1', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {fotoUrl ? (
+                <img src={fotoUrl} alt={profile.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <UserRound size={32} color="#64748b" />
+              )}
+            </div>
+            <div style={{ flex: 1 }}>
+              <strong style={{ display: 'block', fontSize: 14, marginBottom: 4 }}>{t('clientPhoto')}</strong>
+              <label className="btn btn-outline" style={{ fontSize: 12, padding: '6px 12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', margin: 0 }}>
+                <Camera size={14} style={{ marginRight: 6 }}/> {t('uploadPhoto')}
+                <input type="file" accept="image/*" capture="user" onChange={e => void uploadClientPhoto(e.target.files?.[0])} style={{ display: 'none' }} />
+              </label>
+            </div>
+          </div>
+        )}
+
+        <form className="form-grid" onSubmit={submit}>
+          <label>{t('firstName')}<input required minLength={2} maxLength={80} value={name} onChange={e => setName(e.target.value)}/></label>
+          <label>{t('lastName')}<input maxLength={80} value={surname} onChange={e => setSurname(e.target.value)}/></label>
+          {profile.tipo === 'cliente' && <><label>{t('phone')}<input type="tel" required minLength={8} value={phone} onChange={e => setPhone(e.target.value)} autoComplete="tel"/></label><label>{t('city')}<input required value={city} onChange={e => setCity(e.target.value)} autoComplete="address-level2"/></label><label>{t('neighborhood')}<input value={neighborhood} onChange={e => setNeighborhood(e.target.value)}/></label><label>{t('addressShort')}<input required value={address} onChange={e => setAddress(e.target.value)} autoComplete="street-address"/></label>{!isOnboarded && <label className="check-field full"><input type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)} required/> {t('acceptTerms')}</label>}</>}
+          <div className="form-footer full"><Button type="submit" disabled={busy}>{busy ? t('loading') : t('save')} <ArrowRight size={16}/></Button></div>
+        </form>
+        <Notice text={message}/>
+        <Notice text={error} error/>
+      </div>
+      <button className="logout-link" onClick={() => void db.auth.signOut().then(() => nav('home'))}><LogOut size={16}/> {t('logout')}</button>
+    </div>
+  )
 }
 
 function Requests({ profile, onNew }: { profile: Profile; onNew: () => void }) {
@@ -821,6 +915,38 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [workStart, setWorkStart] = useState('08:00')
+  const [workEnd, setWorkEnd] = useState('18:00')
+  const [workDays, setWorkDays] = useState({ mon: true, tue: true, wed: true, thu: true, fri: true, sat: false, sun: false })
+  const [unavailableDates, setUnavailableDates] = useState<string[]>([])
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear())
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth())
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`ugo-availability-${profile.id}`)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed.workStart) setWorkStart(parsed.workStart)
+        if (parsed.workEnd) setWorkEnd(parsed.workEnd)
+        if (parsed.workDays) setWorkDays(parsed.workDays)
+        if (Array.isArray(parsed.unavailableDates)) setUnavailableDates(parsed.unavailableDates)
+      }
+    } catch {}
+  }, [profile.id])
+
+  function saveAvailability() {
+    try {
+      localStorage.setItem(`ugo-availability-${profile.id}`, JSON.stringify({ workStart, workEnd, workDays, unavailableDates }))
+      setMessage(t('saved'))
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  function toggleDateUnavailable(dateStr: string) {
+    setUnavailableDates(prev => prev.includes(dateStr) ? prev.filter(d => d !== dateStr) : [...prev, dateStr])
+  }
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   )
@@ -1174,6 +1300,114 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
             <label>{t('baseRate')}<input type="number" required value={rate} onChange={e => setRate(e.target.value)} min={1} step="0.01"/></label>
             <Button type="submit" disabled={busy || !provider}>{t('save')} <ArrowRight size={16}/></Button>
           </form>
+
+          <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <h3 style={{ fontSize: 15, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CalendarDays size={18} /> {t('availability')}
+            </h3>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t('clickCalendarNote')}</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+              <label style={{ fontSize: 12 }}>
+                {t('workHours')} (Início)
+                <input type="time" value={workStart} onChange={e => setWorkStart(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: 6, border: '1px solid #cbd5e1' }} />
+              </label>
+              <label style={{ fontSize: 12 }}>
+                Fim
+                <input type="time" value={workEnd} onChange={e => setWorkEnd(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: 6, border: '1px solid #cbd5e1' }} />
+              </label>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 6 }}>{t('workDays')}</span>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {[
+                  { key: 'mon', label: 'Seg' },
+                  { key: 'tue', label: 'Ter' },
+                  { key: 'wed', label: 'Qua' },
+                  { key: 'thu', label: 'Qui' },
+                  { key: 'fri', label: 'Sex' },
+                  { key: 'sat', label: 'Sáb' },
+                  { key: 'sun', label: 'Dom' },
+                ].map(d => (
+                  <button
+                    type="button"
+                    key={d.key}
+                    onClick={() => setWorkDays(w => ({ ...w, [d.key]: !w[d.key as keyof typeof w] }))}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: 11,
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      background: workDays[d.key as keyof typeof workDays] ? '#1e293b' : '#fff',
+                      color: workDays[d.key as keyof typeof workDays] ? '#fff' : '#334155',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: 13, fontWeight: 600 }}>
+                <button type="button" onClick={() => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1) } else setCalMonth(m => m - 1) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>‹</button>
+                <span>{new Date(calYear, calMonth, 1).toLocaleString(locale, { month: 'long', year: 'numeric' })}</span>
+                <button type="button" onClick={() => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1) } else setCalMonth(m => m + 1) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>›</button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, textAlign: 'center', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
+                <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+                {(() => {
+                  const firstDay = new Date(calYear, calMonth, 1).getDay()
+                  const totalDays = new Date(calYear, calMonth + 1, 0).getDate()
+                  const cells = []
+                  for (let i = 0; i < firstDay; i++) {
+                    cells.push(<div key={`empty-${i}`} />)
+                  }
+                  for (let day = 1; day <= totalDays; day++) {
+                    const mStr = String(calMonth + 1).padStart(2, '0')
+                    const dStr = String(day).padStart(2, '0')
+                    const dateStr = `${calYear}-${mStr}-${dStr}`
+                    const isOff = unavailableDates.includes(dateStr)
+                    cells.push(
+                      <button
+                        type="button"
+                        key={dateStr}
+                        onClick={() => toggleDateUnavailable(dateStr)}
+                        style={{
+                          aspectRatio: '1',
+                          background: isOff ? '#fee2e2' : '#f8fafc',
+                          color: isOff ? '#991b1b' : '#334155',
+                          border: isOff ? '1px solid #fca5a5' : '1px solid #e2e8f0',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: isOff ? 700 : 400,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        {day}
+                      </button>
+                    )
+                  }
+                  return cells
+                })()}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <Button onClick={saveAvailability} style={{ width: '100%', fontSize: 12, padding: '8px' }}>
+                {t('save')} Agenda
+              </Button>
+            </div>
+          </div>
 
           {provider && provider.estado_verificacion !== 'verificado' && provider.estado_verificacion !== 'pendiente' && (
             <div className="review-form">
