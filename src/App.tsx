@@ -6,6 +6,10 @@ import { useI18n, type Key, type Locale } from './i18n'
 import FAQ from './components/FAQ'
 import { FALLBACK_CATEGORIES, FALLBACK_PROVIDERS } from './seed'
 
+// Vite's base path: Pages serves this app under /<repo>/, so anything resolved at runtime must be
+// prefixed with it. Keeps the base in vite.config.ts as the single source of truth.
+const BASE = import.meta.env.BASE_URL
+
 const Map = lazy(() => import('./components/Map'))
 type Page = 'home' | 'explore' | 'requests' | 'professional' | 'admin' | 'account' | 'auth' | 'new'
 const pages: Page[] = ['home', 'explore', 'requests', 'professional', 'admin', 'account', 'auth', 'new']
@@ -1020,7 +1024,7 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
     if (res === 'granted') {
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.ready
-        reg.showNotification('UGO Pro', { body: t('notifActive'), icon: '/ugo-platform/pwa-192x192.png' })
+        reg.showNotification('UGO Pro', { body: t('notifActive'), icon: `${BASE}pwa-192x192.png` })
       }
     }
   }
@@ -1035,8 +1039,8 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
           navigator.serviceWorker.ready.then(reg => {
             reg.showNotification(t('notifTitle'), {
               body: `${newest.servicio?.descripcion || 'Novo pedido'} · ${newest.servicio?.zona_cliente || ''} (${money(newest.tarifa_ofrecida, locale)})`,
-              icon: '/ugo-platform/pwa-192x192.png',
-              badge: '/ugo-platform/icon.svg',
+              icon: `${BASE}pwa-192x192.png`,
+              badge: `${BASE}icon.svg`,
               tag: `ugo-offer-${newest.id}`,
               data: { url: window.location.href }
             })
