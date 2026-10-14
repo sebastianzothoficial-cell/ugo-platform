@@ -1,0 +1,6 @@
+{
+  "name": "UGO Platform",
+  "description": "UGO conecta você aos profissionais certos, perto de você.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
