@@ -126,6 +126,7 @@ const repoName = opt('--repo') || gitRepo?.repo || pkg.name || null
 const ciRepo = process.env.GITHUB_REPOSITORY ? repoFrom(process.env.GITHUB_REPOSITORY) : null
 const expectedBase = norm(ciRepo?.repo || repoName)
 const pagesUrl = owner?.owner && repoName ? `https://${owner.owner}.github.io/${repoName}/` : null
+const baseCfg = norm(read('vite.config.ts')?.match(/\bbase\s*:\s*['"]([^'"]*)['"]/)?.[1] || expectedBase)
 
 /* ---------------------------------------------------------------- A. source contract */
 const viteRaw = read('vite.config.ts')
@@ -233,20 +234,43 @@ if (has('--build')) {
     if (r.status !== 0) FAIL('D0.build', '`vite build` failed — nothing to verify', String(r.stderr || r.stdout || '').split('\n').slice(0, 6).join(' | '))
   }
 }
-// Workbox (generateSW) writes dist/sw.js itself; a hand-written public/sw.js is silently replaced.
+// Service worker topology: VitePWA's generateSW writes dist/sw.js itself, so any hand-written
+// public/sw.js is silently replaced, and any other worker is dead code unless it is registered
+// (src) or imported by the generated worker (workbox.importScripts).
 {
   const v = read('vite.config.ts') || ''
-  const inject = v.match(/injectManifest\s*:\s*{[\s\S]*?filename:\s*['"]([^'"]+)['"]/)
-  const gen = !/registerType:\s*['"]injectManifest['"]/.test(v) && /VitePWA/.test(v)
-  const publicSw = existsSync(path.join(ROOT, 'public', 'sw.js'))
-  if (!existsSync(path.join(distDir, 'index.html'))) SKIP('D0.sw-collision', 'cannot compare shipped sw.js: dist not built yet', 're-run after `npm run build` (or with --build)')
-  else if (gen && publicSw && !inject) {
-    const shipped = read(path.relative(ROOT, path.join(distDir, 'sw.js')))
-    const custom = read('public/sw.js') || ''
-    const lost = ['push', 'notificationclick'].filter(ev => custom.includes(`'${ev}'`) || custom.includes(`"${ev}"`))
-    FAIL('D0.sw-collision', `public/sw.js is overwritten by the Workbox-generated dist/sw.js (sw.js is ${existsSync(path.join(distDir, 'sw.js')) ? readFileSync(path.join(distDir, 'sw.js'), 'utf8').length : 0} bytes, source is ${custom.length} bytes)${lost.length ? ` — listeners lost: ${lost.join(', ')}` : ''}`,
-      'either point VitePWA at it with injectManifest: { swSrc: "public/sw.js", swDest: "sw.js" } (and add the precache manifest yourself), or rename the custom worker (e.g. public/push-sw.js) and register it separately')
-  } else if (gen && publicSw) SKIP('D0.sw-collision', 'public/sw.js coexists with the generated worker — verify which one ships')
+  const generated = /VitePWA/.test(v) && !/registerType:\s*['"]injectManifest['"]/.test(v)
+  const swDest = generated ? (v.match(/swDest:\s*['"]([^'"]+)['"]/)?.[1] || 'sw.js') : null
+  const swSrc = generated ? (v.match(/swSrc:\s*['"]([^'"]+)['"]/)?.[1] || null) : null
+  const isWorker = f => /addEventListener\(\s*['"](install|activate|push|fetch|notificationclick)['"]/.test(read(path.join('public', f)) || '')
+  const publicWorkers = existsSync(path.join(ROOT, 'public')) ? readdirSync(path.join(ROOT, 'public')).filter(f => f.endsWith('.js') && isWorker(f)) : []
+  const registered = new Set([...(read('src/main.tsx') || '').matchAll(/register\(\s*[`'"]([^`'"]*)[`'"]/g)]
+    .map(m => m[1].replace(/\$\{(?:base|import\.meta\.env\.BASE_URL)\}/g, '').replace(/^\//, '')))
+  const imported = new Set((v.match(/importScripts:\s*\[([^\]]*)\]/)?.[1] || '')
+    .split(',').map(x => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean).map(x => x.split('/').pop()))
+  if (!swDest && !publicWorkers.length) SKIP('D0.sw-topology', 'no service worker involved (no VitePWA, no public/*.js worker)')
+  else if (!existsSync(path.join(distDir, 'index.html'))) SKIP('D0.sw-topology', 'cannot compare shipped workers: dist not built yet', 're-run after `npm run build` (or with --build)')
+  else {
+    const collision = publicWorkers.filter(f => f === swDest && swSrc !== path.join('public', f))
+    const orphans = publicWorkers.filter(f => f !== swDest && !registered.has(f) && !imported.has(f))
+    if (collision.length) {
+      const custom = read(path.join('public', collision[0])) || ''
+      const shippedSw = read(path.join(distDir, swDest)) || ''
+      const lost = ['push', 'notificationclick'].filter(ev => custom.includes(`"${ev}"`) || custom.includes(`'${ev}'`))
+      FAIL('D0.sw-topology', `public/${collision[0]} is overwritten by the Workbox-generated ${swDest} (${shippedSw.length} bytes shipped vs ${custom.length} bytes source)${lost.length ? ` — listeners lost: ${lost.join(', ')}` : ''}`,
+        `either point VitePWA at it (injectManifest with swSrc: "public/${collision[0]}") and add the Workbox precache calls yourself, or rename it and register it separately`)
+    } else if (orphans.length) {
+      FAIL('D0.sw-topology', `${orphans.map(f => `public/${f}${existsSync(path.join(distDir, f)) ? '' : ' (not even copied to dist)'}`).join(', ')} ship(s) but nothing registers or imports it`,
+        'register it in src/main.tsx via import.meta.env.BASE_URL, or list it in workbox.importScripts')
+    } else if (publicWorkers.length) {
+      PASS('D0.sw-topology', `${publicWorkers.map(f => `public/${f}`).join(', ')} all referenced (registered: ${[...registered].join(', ') || '—'}; workbox.importScripts: ${[...imported].join(', ') || '—'})`)
+    } else SKIP('D0.sw-topology', `only the generated ${swDest} exists; no hand-written worker to collide with`)
+    const injected = existsSync(path.join(distDir, 'registerSW.js'))
+    const dup = swDest && registered.has(swDest) && injected
+    if (dup) WARN('D1.sw-double-register', `src/main.tsx registers ${baseCfg}${swDest} and VitePWA injects registerSW.js for the same URL`,
+      'same scope + URL makes the second call a no-op, but if swDest/swSrc ever change the app registration silently points at the wrong worker')
+    else PASS('D1.sw-double-register', 'the generated worker has a single registration path')
+  }
 }
 const built = read(path.relative(ROOT, path.join(distDir, 'index.html')))
 if (built == null) {
@@ -309,7 +333,6 @@ if (built == null) {
 }
 
 /* ---------------------------------------------------------------- E. hardcoded base drift */
-const baseCfg = norm(read('vite.config.ts')?.match(/\bbase\s*:\s*['"]([^'"]*)['"]/)?.[1] || expectedBase)
 const srcFiles = []
 if (existsSync(path.join(ROOT, 'src'))) {
   const walk = dir => {

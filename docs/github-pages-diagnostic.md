@@ -28,29 +28,34 @@ Exit codes: `0` clean, `1` at least one `FAIL` (or any `WARN` with `--strict`), 
 The script uses Node built-ins only, so it also runs in a fresh clone with no `node_modules`
 (`D` reports `SKIP` there instead of guessing).
 
-This is what `main` reports (2026-10-14, at `1360d93`):
+What the doctor prints for this repository **after** `public/push-sw.js` was split out of `sw.js`
+and the base literals were replaced by `import.meta.env.BASE_URL` (`node scripts/check-pages-base.mjs --gh --build --preview`):
+
+```
+0 fail · 0 warn · 23 pass · 1 skip
+```
+
+The relevant rows:
 
 | id | level | finding |
 |---|---|---|
 | `A1` | PASS | `base: '/ugo-platform/'` == repository `ugo-platform` |
 | `A4` | PASS | manifest `id` / `start_url` / `scope` all equal `/ugo-platform/` |
 | `B2` | PASS | source entry is `/src/main.tsx` (correct: dev-only, Vite prefixes it at build) |
+| `B3` | PASS | hash navigation, so `/#/requests` needs no server rewrite |
 | `C2` | PASS | `configure-pages → upload-pages-artifact(path: dist) → deploy-pages` chain complete |
-| `C4`/`C5` | PASS | `npm ci` + `cache: npm` have a committed lockfile *(see caveat in §7)* |
-| `D2` | PASS | 6/6 same-origin URLs in `dist/index.html` are prefixed with `/ugo-platform/` |
+| `C4`/`C5` | PASS | `npm ci` + `cache: npm` have a committed lockfile |
+| `D2` | PASS | 6/6 same-origin URLs in `dist/index.html` prefixed with `/ugo-platform/` |
 | `D3` | PASS | each of those URLs resolves to a real file inside `dist/` |
-| `D5` | PASS | `manifest.webmanifest` present, icons present |
-| `E1` | PASS | no runtime string resolves against the origin root |
-| `D0` | **FAIL** | `public/sw.js` is replaced by the Workbox-generated worker (push listeners lost) |
-| `E2` | WARN | 10 hardcoded `"/ugo-platform/"` literals: `src/App.tsx:1023,1038,1039` (notification icon/badge), `src/main.tsx:9` (SW registration), `public/sw.js` |
-| `F2` | **FAIL** | last Pages workflow run failed at `build: Run actions/setup-node@v4` — no deploy has ever run |
+| `D5` | PASS | `manifest.webmanifest` + 3 icons present |
+| `D0` | PASS | `public/push-sw.js` is referenced (registered in `src/main.tsx`) and survives the build |
+| `D1` | PASS | the generated worker has a single registration path |
+| `E1`/`E2` | PASS | no runtime string escapes the base, and the base is not duplicated in runtime code |
+| `G1`–`G3` | PASS | `vite preview`: index 200, 6/6 assets 200, no origin-root references |
 
-Read the shape of that output: **every path check is green** — base, source entry, artifact URLs,
-manifest scope — so the deployment *path* is correct. `F2` and `D0` are not path bugs: nothing is
-being published at all (`F2`), and the hand-written service worker never reaches the artifact (`D0`).
-`package-lock.json` on this branch fixes `F2`; `D0` and `E2` are left for a separate change.
-
----
+Read the shape of that output: every path check is green, so the deployment *path* is correct. The
+two findings the doctor first surfaced on this repo (`F2` publish pipeline, `D0` service-worker
+collision) were **not** path bugs — which is the point of grouping the checks that way.
 
 ## 2. The model (why each check exists)
 
@@ -150,9 +155,9 @@ Root-cause order when the deployed page is blank: **4.5 (is HTML even 200?) → 
 | Works at root, breaks in `<iframe>`/preview proxy | relative `base` (`'./'`) + absolute runtime strings | keep an absolute `base`; make runtime strings relative to `import.meta.env.BASE_URL` |
 | Blank page, no 404s, console shows `Unexpected token '<'` | every asset request fell back to a 404 HTML page | base/artifact-path mismatch — check `C3` (`path: dist`, not `dist/dist`) |
 | Deep link `/#/requests` works, `/requests` 404 | expected for hash routing; you are hand-typing a path route | keep hash navigation, or add `dist/404.html` (a copy of `index.html`) as a client-side fallback |
-| PWA install prompt never appears; `sw.js` 404 | `sw.js` not copied to `dist/`, or registered path outside base | keep `public/sw.js` (Vite copies it), register `${import.meta.env.BASE_URL}sw.js` |
-| Installed app opens the wrong URL / offline cache empty | `start_url`/`scope` ≠ base | align `manifest.id/start_url/scope` with `base` (`A4`) |
-| Notification icon broken on Android | `/ugo-platform/…` literal in `public/sw.js` | use a URL relative to the worker (`./pwa-192x192.png`) — a classic worker has no `import.meta` |
+| PWA install prompt never appears; `sw.js` 404 | `sw.js` not copied to `dist/`, or registered path outside base | the generated worker must stay at `dist/sw.js`; register nothing for it by hand (VitePWA injects `registerSW.js`) |
+| Installed app opens the wrong URL / offline cache empty | `start_url`/`scope` ≠ base, or a second worker at the same scope never activating | align `manifest.id/start_url/scope` with `base` (`A4`); check `D0`/`D1` for which worker owns the scope |
+| Notification icon broken on Android | origin-root literal in a classic `public/*.js` worker | use scope-relative URLs (`./pwa-192x192.png`) — `public/` files get no `import.meta` and no base rewrite |
 | CI red at `Run actions/setup-node@v4` with `cache: npm` | `package-lock.json` not committed | commit the lockfile (or drop `cache: npm`) |
 | CI red at `Run npm ci` | lockfile absent/out of sync | `npm install`, commit `package-lock.json` |
 | CI red at `npm run typecheck` | source-level break; Pages serves the last good build | fix types; see §6 for the gate |
@@ -176,38 +181,43 @@ Add one step to the `build` job so a base/path regression fails before the artif
           path: dist
 ```
 
-`--strict` also fails on `WARN`, which currently means `E2` (hardcoded base literals) must be
-resolved first — decide whether you want that bar before wiring it in.
+`--strict` also fails on `WARN`. This repository is currently `0 fail / 0 warn`, so the gate is safe
+to wire in as-is; it will start protecting `D0`/`D1` (worker topology) and `E1`/`E2` (base drift) as
+soon as someone reintroduces either.
 
 The lightweight equivalent in `tests/contracts.test.mjs` (regex only, no fs walking) is also fine as a
 first line of defence; the script adds the built-artifact and network layers the regex cannot see.
 
 ---
 
-## 7. Known state of `main`
+## 7. History of what this found on `main`
 
-1. **`F2` (blocking, fixed by this branch):** every recent `Build and deploy UGO` run fails at
-   `Run actions/setup-node@v4`. `cache: npm` needs a lockfile to hash and none was versioned
-   (`git ls-files package-lock.json` → empty), so the build job dies, `deploy` is skipped, and with
-   `build_type=workflow` nothing is ever published. `package-lock.json` in this branch makes
-   `C4`/`C5`/`F2` green — `F2` only after the change lands on `main`, because it reads the latest run
-   of the *default* branch.
-2. **`README.md` is stale in two places:** it documents `cp .env.example .env # optional: checked-in
-   defaults contain only the existing public project URL and publishable key`, but `main`'s
-   `.env.example` now holds three empty assignments — the values live as fallbacks in `src/lib.ts`
-   instead. Worth an explicit doc/code pass; the doctor does not assert on it.
-3. **`E2` (latent):** 10 hardcoded `/ugo-platform/` literals. Harmless while `base` == repository
-   name; silent 404s after a rename, a move to a custom domain, or a root deploy. Note the auth
-   redirect already does it right (`` `${location.origin}${import.meta.env.BASE_URL}#/account` `` in
-   `src/App.tsx:552`) — only the notification/SW strings were hand-written.
-4. **`D0`:** `VitePWA` runs in `generateSW` mode, so Vite writes its own precaching `dist/sw.js`
-   (1877 bytes) over the copy of `public/sw.js` (1497 bytes). Verified: `grep -c push dist/sw.js`
-   → `0`, so provider push/notification handling is dead in every build. Either wire the file in with
-   `injectManifest: { swSrc: 'public/sw.js', swDest: 'sw.js' }` (then add your own precache calls) or
-   rename it (`public/push-sw.js`) and register both workers. Note that `dist/registerSW.js` (injected
-   by the plugin) already registers `/ugo-platform/sw.js`, and `src/main.tsx` registers the same URL a
-   second time — a third symptom of the same collision, not of the base path.
-5. The sandbox used to build this guide has egress limited to `github.com`, `api.github.com`,
-   `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, so `*.github.io` is unreachable from
-   here (`G1` reports `SKIP` with `ECONNRESET`). `--live` must be run from a normal machine;
-   `--preview` gives the equivalent check against the artifact locally.
+1. **`F2` (was blocking, fixed):** every `Build and deploy UGO` run failed at
+   `Run actions/setup-node@v4`. `cache: npm` needs a lockfile to hash and none was versioned, so the
+   build job died, `deploy` was skipped, and with `build_type=workflow` nothing published — while
+   `GET /repos/:owner/:repo/pages` still answered `status=built` (a leftover of the legacy builder,
+   which that build type ignores). Fixed by committing `package-lock.json`. `F2` reads the latest run
+   of the *default* branch, so it only flips green after the fix lands on `main`.
+2. **`D0` (fixed):** `VitePWA` in `generateSW` mode writes its own precaching `dist/sw.js`, which
+   silently replaced the copy of `public/sw.js` — `grep -c push dist/sw.js` was `0`, so provider
+   push/notification handling never shipped. `public/sw.js` is now `public/push-sw.js`, registered by
+   `src/main.tsx`; the generated worker stays in charge of offline caching and gains the tap handler
+   through `workbox.importScripts: ['notificationclick-handler.js']` (a Workbox *runtime* `importScripts`
+   call, not the bundler option `vite-plugin-pwa` does not accept). Two workers share the base scope;
+   a classic `public/*.js` worker has no `import.meta`, so its URLs are relative to the scope.
+   The old `public/sw.js` also called a bare `clients.claim()` / `clients.matchAll()`, which is a
+   `ReferenceError` in a service worker (`self.clients` is the accessor) — that alone would have broken
+   `activate` even if the file had ever shipped.
+3. **`E2` (fixed):** the 10 hardcoded `"/ugo-platform/"` literals are gone. `src/App.tsx` uses a
+   module-level `const BASE = import.meta.env.BASE_URL` for notification `icon`/`badge`,
+   `src/main.tsx` derives the registration URL and scope from it, and `public/push-sw.js` uses
+   scope-relative URLs. `src/App.tsx` already used `` `${location.origin}${import.meta.env.BASE_URL}#/account` ``
+   for the auth redirect, so the base now has exactly one definition site: `vite.config.ts`.
+4. **Still true:** `README.md` says `cp .env.example .env # optional: checked-in defaults contain only
+   the existing public project URL and publishable key`, but `main`'s `.env.example` holds three empty
+   assignments (the values live as fallbacks in `src/lib.ts`); it also predates `check:pages` in
+   prose form. Worth a docs pass — the doctor does not assert on it.
+5. **Sandbox limit:** egress here is restricted to `github.com`, `api.github.com`, `registry.npmjs.org`,
+   `pypi.org`, `files.pythonhosted.org`, so `*.github.io` is unreachable (`G1` reports `SKIP` with
+   `ECONNRESET`). `--live` must run from a normal machine; `--preview` gives the equivalent check
+   against the real artifact.

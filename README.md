@@ -6,7 +6,7 @@ React 19 + TypeScript + Vite front-end for the existing UGO Supabase **TEST** pr
 
 ```sh
 npm ci
-cp .env.example .env # optional: checked-in defaults contain only the existing public project URL and publishable key
+cp .env.example .env # fill VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY; src/lib.ts falls back to the public TEST project
 npm run dev
 npm run typecheck
 npm test

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 test('Vite and Pages publish at the same repository base', () => {
   assert.match(read('vite.config.ts'), /base:\s*['"]\/ugo-platform\/['"]/)
@@ -29,4 +29,14 @@ test('all three languages are configured and Brazilian Portuguese is default', (
   for (const locale of ['pt-BR', 'es', 'en']) assert.ok(i18n.includes(locale))
   assert.match(i18n, /\? l : 'pt-BR'/)
   assert.match(i18n, /preferred_language/)
+})
+
+test('service workers survive the Pages base path without colliding', () => {
+  assert.ok(!existsSync(new URL('../public/sw.js', import.meta.url)), 'public/sw.js would be overwritten by the Workbox-generated dist/sw.js')
+  assert.match(read('src/main.tsx'), /register\(\s*`\$\{base\}push-sw\.js`/, 'push worker must be registered explicitly')
+  assert.match(read('src/main.tsx'), /const base = import\.meta\.env\.BASE_URL/, 'registration URL must follow the Vite base')
+  assert.doesNotMatch(read('src/main.tsx'), /register\(`\$\{base\}sw\.js`/, 'the generated worker is registered by the injected registerSW.js only')
+  for (const file of ['src/App.tsx', 'src/main.tsx', 'public/push-sw.js', 'public/notificationclick-handler.js']) {
+    assert.doesNotMatch(read(file), /['"`]\/ugo-platform\//, `${file} hardcodes the Pages base instead of deriving it`)
+  }
 })
