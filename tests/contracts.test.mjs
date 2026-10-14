@@ -14,7 +14,7 @@ const statusLabels = () => {
   const block = source.slice(source.indexOf('serviceStatusKeys'), source.indexOf('export function serviceStatusLabel'))
   return Object.fromEntries([...block.matchAll(/(\w+): '(\w+)'/g)].map(m => [m[1], m[2]]))
 }
-const SERVICE_ESTADOS = ['borrador', 'buscando', 'ofrecido', 'asignado', 'confirmado', 'en_camino', 'llegado', 'ejecutando', 'completado', 'cancelado']
+const SERVICE_ESTADOS = ['borrador', 'buscando', 'ofrecido', 'asignado', 'en_camino', 'llegado', 'en_progreso', 'esperando_aprobacion', 'completado', 'cancelado', 'disputado']
 test('Vite and Pages publish at the same repository base', () => {
   assert.match(read('vite.config.ts'), /base:\s*['"]\/ugo-platform\/['"]/)
   assert.match(read('.github/workflows/pages.yml'), /branches: \[main\]/)
@@ -28,8 +28,9 @@ test('only publishable credentials are referenced by the browser, no private key
   }
   assert.match(read('src/lib.ts'), /VITE_SUPABASE_PUBLISHABLE_KEY/)
 })
+const sourceTree = () => readdirSync(new URL('../src/', import.meta.url), { recursive: true }).filter(f => /\.(ts|tsx)$/.test(f)).map(f => read(`src/${f}`)).join('\n')
 test('request and assignment use canonical owner-scoped Supabase contracts', () => {
-  const app = read('src/App.tsx')
+  const app = sourceTree()
   for (const name of ['completar_onboarding_cliente', 'guardar_ubicacion_servicio_cliente', 'iniciar_matching', 'cancelar_servicio', 'obtener_ofertas_proveedor', 'aceptar_oferta', 'rechazar_oferta', 'activar_disponibilidad_proveedor']) assert.ok(app.includes(name), `${name} is missing`)
   assert.match(app, /metadata->>request_draft_id/)
   assert.match(app, /getUser\(\)/)
@@ -55,7 +56,7 @@ test('every locale carries the same non-empty keys', () => {
 })
 test('no translation key is left unused', () => {
   const source = i18nSource()
-  const code = read('src/App.tsx') + read('src/components/Map.tsx') + source.slice(source.indexOf('} as const'))
+  const code = sourceTree().replace(/const words[\s\S]*\} as const/, '')
   const used = new Set([...code.matchAll(/'([a-zA-Z][\w-]*)'/g).map(m => m[1]), ...code.matchAll(/words\[[^\]]+\]\.(\w+)/g).map(m => m[1])])
   for (const key of Object.values(statusLabels())) used.add(key)
   const dead = Object.keys(dictionary()['pt-BR']).filter(key => !used.has(key))
@@ -64,24 +65,33 @@ test('no translation key is left unused', () => {
 test('every service status is labelled and styled, never shown as raw database text', () => {
   const labels = statusLabels()
   const words = dictionary()
-  for (const estado of SERVICE_ESTADOS) {
+  const flow = read('src/flow.ts')
+  const arrays = [...flow.matchAll(/export const (?:MATCHING_STATES|CANCELLABLE_STATES) = \[([^\]]*)\]/g)].flatMap(m => m[1].split(',').map(v => v.replace(/['\s]/g, '')).filter(Boolean))
+  const transitions = Object.entries(Object.fromEntries([...flow.slice(flow.indexOf('PROVIDER_NEXT'), flow.indexOf('export const MATCHING_STATES')).matchAll(/(\w+): '(\w+)'/g)].map(m => [m[1], m[2]])))
+  const referenced = [...SERVICE_ESTADOS, ...arrays, ...transitions.flat()]
+  assert.ok(arrays.length === 7, `the state lists must stay readable by this test, found ${arrays.length}`)
+  assert.deepEqual(transitions, [['asignado', 'en_camino'], ['en_camino', 'llegado'], ['llegado', 'en_progreso'], ['en_progreso', 'esperando_aprobacion']], 'provider transitions must match private.avanzar_servicio_impl')
+  for (const estado of referenced) {
     const key = labels[estado]
     assert.ok(key, `${estado} has no localized label`)
     for (const [locale, entries] of Object.entries(words)) assert.ok(String(entries[key]).trim(), `${estado} label is empty in ${locale}`)
     assert.match(read('src/style.css'), new RegExp(`\\.status-${estado}[,{:]`), `${estado} pill has no style`)
   }
-  const app = read('src/App.tsx')
+  const app = sourceTree()
   assert.match(app, /serviceStatusLabel\(row\.estado, t\)/)
   assert.match(app, /serviceStatusLabel\(j\.estado, t\)/)
-  assert.doesNotMatch(app, /estado\.replaceAll\(/, 'statuses must not be rendered with raw underscores')
-  // Whatever the UI branches on must also be labelled: an action for a state with no label would show SQL text.
-  const lifecycle = app.slice(app.indexOf('const nextState'), app.indexOf('as Record<string,string>'))
-  const referenced = [
-    ...[...app.matchAll(/\[([^\]]*)\]\.includes\(row\.estado\)/g)].flatMap(m => m[1].split(',').map(v => v.replace(/['\s]/g, '')).filter(Boolean)),
-    ...[...lifecycle.matchAll(/(\w+): '(\w+)'/g)].flatMap(m => [m[1], m[2]])
-  ]
-  assert.ok(referenced.length >= 8, 'the lifecycle lists must still be readable by this test')
-  for (const estado of referenced) assert.ok(labels[estado], `${estado} is branched on in the UI but has no status label`)
+  assert.doesNotMatch(read('src/App.tsx'), /estado\.replaceAll\(/, 'statuses must not be rendered with raw underscores')
+  // `ejecutando` and `confirmado` are not part of public.servicio_estado: sending them made the provider step
+  // fail with an invalid enum value, and closing the service belongs to the client anyway.
+  for (const invented of ['ejecutando', 'confirmado']) assert.doesNotMatch(app, new RegExp(`'${invented}'`), `${invented} is not a real servicio_estado`)
+})
+test('mutations go through the verified flow module', () => {
+  const app = read('src/App.tsx')
+  for (const name of ['iniciar_matching', 'cancelar_servicio', 'aceptar_oferta', 'rechazar_oferta', 'avanzar_servicio', 'marcar_llegada_proveedor', 'guardar_ubicacion_servicio_cliente']) assert.ok(!app.includes(`db.rpc('${name}'`), `${name} must run through src/flow.ts so the persisted state is verified`)
+  assert.doesNotMatch(app, /from\('servicios'\)\.insert/, 'only publishOrder may create a service row')
+  for (const name of ['publishOrder', 'resumeMatching', 'cancelOrder', 'respondOffer', 'advanceService', 'registerEvidence']) assert.ok(app.includes(`${name}(`), `${name} is not wired into the UI`)
+  assert.match(app, /sessionStorage\.removeItem\(storageKey\)/, 'the draft key is dropped only once the order is confirmed')
+  assert.match(app, /\? t\('verifiedByState'\)/, 'a recovered action that the database confirms must say so')
 })
 test('the map degrades to an OpenStreetMap link instead of a blank panel', () => {
   const map = read('src/components/Map.tsx')
@@ -140,4 +150,38 @@ test('private lists refresh when the tab becomes visible again', () => {
   const app = read('src/App.tsx')
   assert.match(app, /function useRefreshOnVisible\(/)
   assert.equal((app.match(/useRefreshOnVisible\(load\)/g) || []).length, 2, 'the client and provider dashboards must both refresh')
+})
+
+test('the P0 verification harness covers every object the app actually depends on', () => {
+  const probe = read('scripts/verificar-contrato.mjs')
+  const doc = read('docs/VERIFICACION_SUPABASE.md')
+  const src = sourceTree()
+  const used = new Set([...src.matchAll(/\.from\('([a-z_]+)'\)/g)].map(m => m[1]))
+  const rpcCalls = [...src.matchAll(/rpc\(\s*db,?\s*'([a-z_]+)'/g), ...src.matchAll(/db\.rpc\('([a-z_]+)'/g)]
+  const rpcs = new Set(rpcCalls.map(m => m[1]))
+  assert.ok(used.size >= 9, `esperaba al menos las 9 tablas del flujo, vi ${used.size}`)
+  for (const table of used) assert.ok(probe.includes(`${table}:`), `la sonda no cubre la tabla ${table}`)
+  assert.ok(rpcs.size >= 8, `se esperaban las RPCs del flujo, hay ${rpcs.size}`)
+  // Las dos de decisión comparten llamada, así que no aparecen como literal junto a rpc(db, …).
+  for (const name of ['aceptar_oferta', 'rechazar_oferta']) {
+    assert.ok(src.includes(`'${name}'`), `el flujo debe llamar ${name}`)
+    rpcs.add(name)
+  }
+  for (const name of rpcs) assert.ok(probe.includes(`'${name}'`), `la sonda no cubre la RPC ${name}`)
+  // El documento debe dejar claro qué NO se pudo verificar y cómo se comprueba RLS/Storage.
+  assert.match(doc, /No ejecutable/)
+  assert.match(doc, /relrowsecurity|rls_enabled/)
+  assert.match(doc, /service-evidence/)
+  assert.match(doc, /provider-kyc/)
+  assert.match(doc, /servicio_estado/)
+  // Y la sonda no puede usar una clave privada bajo ningún punto.
+  assert.ok(!/service_role|SERVICE_ROLE/.test(probe.replace(/nunca una service_role|no una service_role/g, '')), 'la sonda no debe tocar una service_role')
+})
+
+test('a retry reuses the draft only while the request is unchanged', () => {
+  const app = read('src/App.tsx')
+  const submit = app.slice(app.indexOf('const storageKey'), app.indexOf('const result = await publishOrder'))
+  assert.match(submit, /sessionStorage\.getItem\(storageKey\)/, 'el rastro debe leerse antes de insertar')
+  assert.match(submit, /-fp`\) !== fingerprint/, 'un pedido editado no puede recuperar el rastro anterior')
+  assert.match(app, /removeItem\(storageKey\); sessionStorage\.removeItem\(`\$\{storageKey\}-fp`\)/, 'al confirmar se sueltan ambos rastros')
 })
