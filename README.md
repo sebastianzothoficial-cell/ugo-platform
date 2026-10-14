@@ -11,6 +11,7 @@ npm run dev
 npm run typecheck
 npm test
 npm run build
+npm run check:pages              # Pages base-path doctor (docs/github-pages-diagnostic.md)
 ```
 
 The SPA uses hash navigation, so a direct `/#/requests` load works under `/ugo-platform/` without a server rewrite. The Vite base prefixes JS/CSS assets. Supabase confirmation and reset links must allow the Pages URL in **Supabase Auth URL Configuration** (Site URL / additional redirect URLs). GitHub Pages serves static files only; no server-side payment, AI or webhook keys belong here.
