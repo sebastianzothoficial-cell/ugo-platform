@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, useRef, lazy, Suspense, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, ArrowUpRight, BadgeCheck, BriefcaseBusiness, CalendarDays, Camera, Check, CheckCircle2, ChevronDown, Clock, Compass, Crosshair, Download, Heart, LogOut, MapPin, Menu, MessageCircle, Search, ShieldCheck, Smartphone, Sparkles, Star, UserRound, X } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, BadgeCheck, BriefcaseBusiness, CalendarDays, Camera, Check, CheckCircle2, ChevronDown, Clock, Compass, Crosshair, Download, Heart, LogOut, MapPin, Menu, MessageCircle, Search, ShieldCheck, Smartphone, Sparkles, Star, UserRound, X, Coins, Ticket } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { db, coordinates, date, errorMessage, money, type Profile, type Category, type Provider, type Service, type Offer } from './lib'
 import { useI18n, type Key, type Locale } from './i18n'
 import FAQ from './components/FAQ'
+import LoyaltyRewards from './components/LoyaltyRewards'
 import { FALLBACK_CATEGORIES, FALLBACK_PROVIDERS } from './seed'
 
 const Map = lazy(() => import('./components/Map'))
@@ -679,6 +680,14 @@ function Requests({ profile, onNew }: { profile: Profile; onNew: () => void }) {
   const [reviewedIds, setReviewedIds] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(`ugo-reviewed-${profile.id}`) || '[]') } catch { return [] }
   })
+  const [clientTab, setClientTab] = useState<'requests' | 'loyalty'>('requests')
+  const [loyaltyCoins, setLoyaltyCoins] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`ugo-loyalty-${profile.id}`)
+      if (saved) return JSON.parse(saved).coins
+    } catch {}
+    return 250
+  })
 
   const load = useCallback(async () => {
     setBusy(true); setError('')
@@ -735,15 +744,109 @@ function Requests({ profile, onNew }: { profile: Profile; onNew: () => void }) {
   return (
     <div className="container inner-page">
       <div className="page-head">
-        <Heading kicker="UGO / CLIENTE" title={t('yourRequests')} subtitle={`${t('welcome')}, ${profile.nombre}.`}/>
+        <Heading kicker="UGO / CLIENTE" title={clientTab === 'loyalty' ? t('loyaltyRewards') : t('yourRequests')} subtitle={`${t('welcome')}, ${profile.nombre}.`}/>
         <Button onClick={onNew}>{t('newRequest')} <ArrowUpRight size={17}/></Button>
       </div>
 
-      <Notice text={error} error/>
-      <Notice text={message}/>
+      {/* Client Dashboard Navigation Tabs */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 25, borderBottom: '1px solid #e2e8df', paddingBottom: 14 }}>
+        <button
+          type="button"
+          onClick={() => setClientTab('requests')}
+          style={{
+            border: 0,
+            background: 'none',
+            fontSize: 14,
+            fontWeight: 700,
+            color: clientTab === 'requests' ? '#183e30' : '#6b7d6f',
+            borderBottom: clientTab === 'requests' ? '2px solid #183e30' : '2px solid transparent',
+            paddingBottom: 10,
+            marginBottom: -15,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8
+          }}
+        >
+          <BriefcaseBusiness size={16} />
+          {t('myRequestsTab')} ({rows.length})
+        </button>
 
-      {busy ? (
-        <div className="service-list">
+        <button
+          type="button"
+          onClick={() => {
+            setClientTab('loyalty')
+            try {
+              const saved = localStorage.getItem(`ugo-loyalty-${profile.id}`)
+              if (saved) setLoyaltyCoins(JSON.parse(saved).coins)
+            } catch {}
+          }}
+          style={{
+            border: 0,
+            background: 'none',
+            fontSize: 14,
+            fontWeight: 700,
+            color: clientTab === 'loyalty' ? '#183e30' : '#6b7d6f',
+            borderBottom: clientTab === 'loyalty' ? '2px solid #183e30' : '2px solid transparent',
+            paddingBottom: 10,
+            marginBottom: -15,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8
+          }}
+        >
+          <Coins size={16} color="#d97706" />
+          {t('rewardsTab')}
+          <span style={{ background: '#fef3c7', color: '#92400e', fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 800 }}>
+            {loyaltyCoins} Coins
+          </span>
+        </button>
+      </div>
+
+      {clientTab === 'loyalty' ? (
+        <LoyaltyRewards profile={profile} />
+      ) : (
+        <>
+          {/* Quick Loyalty Summary Banner */}
+          <div
+            onClick={() => setClientTab('loyalty')}
+            style={{
+              background: '#fff',
+              border: '1px solid #e1e9dd',
+              borderRadius: 12,
+              padding: '14px 20px',
+              marginBottom: 20,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 38, height: 38, borderRadius: '50%', background: '#fef3c7', display: 'grid', placeItems: 'center', color: '#d97706', flexShrink: 0 }}>
+                <Coins size={20} />
+              </div>
+              <div>
+                <strong style={{ fontSize: 13, color: '#183e30', display: 'block' }}>
+                  {t('loyaltyRewards')}: {loyaltyCoins} {t('ugoCoins')}
+                </strong>
+                <small style={{ color: '#687b6b', fontSize: 11 }}>
+                  Você possui cupons de desconto ativos na sua carteira. Clique para gerenciar seus benefícios.
+                </small>
+              </div>
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#23593b', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              {t('walletView')} <ArrowRight size={14} />
+            </span>
+          </div>
+
+          <Notice text={error} error/>
+          <Notice text={message}/>
+
+          {busy ? (
+            <div className="service-list">
           {[1, 2, 3].map(i => <div className="skeleton-card shimmer" key={i} style={{ height: 120 }} />)}
         </div>
       ) : rows.length ? (

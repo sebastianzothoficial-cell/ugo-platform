@@ -1,23 +1,28 @@
-# Implementation Plan - Professional Photo Gallery & Work History
+# Implementation Plan - Client App Advanced Enhancements
 
 ## User Goal
-Implement a photo gallery editor in the Professional profile where providers can upload multiple project photos, enabling clients to see their past work history across profiles and service details.
+Enhance the Client App with four powerful advanced pillars:
+1. **Advanced Filters & Interactive Map Toggle**: Filter by distance, category, price range, rating, and toggle between grid view and interactive OpenStreetMap view.
+2. **Favorite Professionals & Instant Booking Calendar**: Save favorite pros to a dedicated "Favorites" tab, and launch an instant booking calendar modal with slot selection and service warranty options.
+3. **Real-Time Chat & GPS Tracking**: Live messaging modal with professional during active bookings, and simulated GPS route tracking map for arriving technicians.
+4. **Loyalty Program & Coupons**: UGO Rewards points system, tier status (Silver/Gold/Platinum), reward redemption, and promo coupon code input during checkout.
 
 ## Proposed Changes
 
-### 1. Database & State Management
-- Support storing professional portfolio photos in Supabase (`perfiles_proveedor` gallery table or jsonb column, or `localStorage` fallback for robust offline/local resilience).
-- Provide clean state management in `src/App.tsx` for professional project gallery photos (adding, deleting captions, uploading images).
+### 1. State & Data Structures in `src/App.tsx`
+- Add `favorites` state (array of professional IDs, persisted in `localStorage`).
+- Add `clientLoyalty` state (points, tier, active coupons, discount history).
+- Add `clientChat` state (active chat messages per booking/professional).
+- Add `advancedFilters` state (radius km, minRating, maxPrice, verifiedOnly).
+- Add promo code state during booking checkout.
 
-### 2. Professional Profile Editor ("App Provedor")
-- Add a dedicated **Project Portfolio / Past Work Gallery** section in the Professional profile edit view.
-- Allow uploading multiple project photos with optional title/description/category.
-- Allow deleting existing portfolio photos instantly.
-
-### 3. Client View ("App Cliente" & Service Details)
-- Display the professional's project photo gallery in their public profile view so clients can inspect past work history before booking.
-- Display portfolio photos in service details / booking preview modals when a client selects a professional.
+### 2. Client View Enhancements (`Explore` / `ClientDashboard`)
+- **Top Bar & Filters Modal**: Advanced filter controls (distance slider, price filter, minimum rating, verified badge only).
+- **Interactive Map / Grid Toggle**: Toggle button between Card Grid and Map view (showing pins with OpenStreetMap preview).
+- **Favorites Tab**: Dedicated tab or section for saved favorite professionals with quick-book button.
+- **Instant Booking Modal**: Date & time slot picker, service warranty add-on checkbox, promo code input applying loyalty discount.
+- **Active Orders & GPS Tracking**: Real-time map simulation showing technician en route to client location with ETA countdown, and in-app chat modal.
+- **Loyalty & Rewards Center**: Dedicated modal or card showing UGO Coins balance, points history, available reward discounts, and coupon wallet.
 
 ## Verification Plan
-- Compile applet with `compile_applet`.
-- Lint with `lint_applet`.
+- Compile with `compile_applet` and test all new client features.
