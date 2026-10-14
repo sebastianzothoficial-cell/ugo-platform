@@ -23,7 +23,8 @@ const words = {
     adminTabOverview: 'Visão geral', adminTabUsers: 'Usuários', adminTabJobs: 'Serviços', adminTabPros: 'Profissionais', adminTabSystem: 'Sistema & Saúde',
     notifTitle: 'Alertas de Novos Trabalhos', notifDesc: 'Receba alertas instantâneos quando um cliente solicitar um serviço na sua região, mesmo com o app em segundo plano.', notifBtn: 'Ativar Notificações Push', notifActive: 'Notificações ativadas', notifBlocked: 'Notificações bloqueadas',
     profilePhoto: 'Foto de perfil', takePhoto: 'Tirar foto com câmera', uploadPhoto: 'Enviar foto', capture: 'Capturar', retake: 'Tirar outra',
-    availability: 'Agenda e Disponibilidade', workHours: 'Horário de atendimento', workDays: 'Dias de atendimento', unavailableDays: 'Dias indisponíveis (Folgas)', clickCalendarNote: 'Clique em qualquer dia do calendário para marcar ou desmarcar sua folga.', clientPhoto: 'Foto do Cliente'
+    availability: 'Agenda e Disponibilidade', workHours: 'Horário de atendimento', workDays: 'Dias de atendimento', unavailableDays: 'Dias indisponíveis (Folgas)', clickCalendarNote: 'Clique em qualquer dia do calendário para marcar ou desmarcar sua folga.', clientPhoto: 'Foto do Cliente',
+    portfolioGallery: 'Galeria de Projetos / Portfólio', addPhoto: 'Adicionar Foto', projectTitle: 'Título do projeto (opcional)'
   },
   es: {
     idDoc: 'Documento de identidad (frente)', cpf: 'CPF', pixKey: 'Clave Pix', baseRate: 'Tarifa base (R$)', submitReview: 'Enviar registro a revisión', reviewNotice: 'El equipo UGO revisará tu registro. Podrás recibir servicios después de la aprobación.', docSaved: 'Documento enviado de forma segura.', privacy: 'Documento guardado en almacenamiento privado. No envíes datos de terceros.',
@@ -42,7 +43,8 @@ const words = {
     adminTabOverview: 'Resumen', adminTabUsers: 'Usuarios', adminTabJobs: 'Servicios', adminTabPros: 'Profesionales', adminTabSystem: 'Sistema y salud',
     notifTitle: 'Alertas de Nuevos Trabajos', notifDesc: 'Recibí alertas instantáneas cuando un cliente solicite un servicio en tu zona, incluso con la app en segundo plano.', notifBtn: 'Activar Notificaciones Push', notifActive: 'Notificaciones activadas', notifBlocked: 'Notificaciones bloqueadas',
     profilePhoto: 'Foto de perfil', takePhoto: 'Tomar foto con cámara', uploadPhoto: 'Subir foto', capture: 'Capturar', retake: 'Tomar otra',
-    availability: 'Agenda y Disponibilidad', workHours: 'Horario de atención', workDays: 'Días de atención', unavailableDays: 'Días no disponibles (Feriados)', clickCalendarNote: 'Hacé clic en cualquier día del calendario para marcar o desmarcar tu día libre.', clientPhoto: 'Foto de Cliente'
+    availability: 'Agenda y Disponibilidad', workHours: 'Horario de atención', workDays: 'Días de atención', unavailableDays: 'Días no disponibles (Feriados)', clickCalendarNote: 'Hacé clic en cualquier día del calendario para marcar o desmarcar tu día libre.', clientPhoto: 'Foto de Cliente',
+    portfolioGallery: 'Galería de Proyectos / Portafolio', addPhoto: 'Agregar Foto', projectTitle: 'Título del proyecto (opcional)'
   },
   en: {
     idDoc: 'Identity document (front)', cpf: 'CPF', pixKey: 'Pix key', baseRate: 'Base rate (R$)', submitReview: 'Submit profile for review', reviewNotice: 'The UGO team will review your profile. You can only receive jobs after approval.', docSaved: 'Document uploaded securely.', privacy: 'Document stored privately. Do not submit someone else’s data.',
@@ -61,7 +63,8 @@ const words = {
     adminTabOverview: 'Overview', adminTabUsers: 'Users', adminTabJobs: 'Services', adminTabPros: 'Professionals', adminTabSystem: 'System & Health',
     notifTitle: 'New Job Alerts', notifDesc: 'Receive instant alerts when a client requests a service in your area, even when the app is in the background.', notifBtn: 'Enable Push Notifications', notifActive: 'Notifications active', notifBlocked: 'Notifications blocked',
     profilePhoto: 'Profile photo', takePhoto: 'Take photo with camera', uploadPhoto: 'Upload photo', capture: 'Capturar', retake: 'Retake',
-    availability: 'Schedule & Availability', workHours: 'Working hours', workDays: 'Working days', unavailableDays: 'Unavailable days (Time off)', clickCalendarNote: 'Click any day on the calendar to toggle time off.', clientPhoto: 'Client Photo'
+    availability: 'Schedule & Availability', workHours: 'Working hours', workDays: 'Working days', unavailableDays: 'Unavailable days (Time off)', clickCalendarNote: 'Click any day on the calendar to toggle time off.', clientPhoto: 'Client Photo',
+    portfolioGallery: 'Project Portfolio / Gallery', addPhoto: 'Add Photo', projectTitle: 'Project title (optional)'
   }
 } as const
 

@@ -510,10 +510,32 @@ function Explore({ categories, providers, busy, error, retry, selected, setSelec
               target="_blank"
               rel="noopener noreferrer"
               className="text-link"
-              style={{ fontSize: 12, marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              style={{ fontSize: 12, marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}
             >
               <Compass size={14} /> OpenStreetMap ↗
             </a>
+
+            {(() => {
+              let proPortfolio: { id: string; url: string; title: string }[] = []
+              try {
+                const saved = localStorage.getItem(`ugo-pro-portfolio-${selectedProvider.id}`)
+                if (saved) proPortfolio = JSON.parse(saved)
+              } catch {}
+              if (!proPortfolio.length) return null
+              return (
+                <div style={{ marginTop: 12, marginBottom: 16, textAlign: 'left', width: '100%' }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: '#1e293b' }}>{t('portfolioGallery')} ({proPortfolio.length})</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {proPortfolio.map(item => (
+                      <div key={item.id} style={{ aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f8fafc' }} title={item.title}>
+                        <img src={item.url} alt={item.title || 'Portfólio'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
             <p>{t('from')} {money(selectedProvider.tarifa_base, locale)}</p>
             <Button onClick={() => { setProvider(null); request() }}>{t('request')} <ArrowRight size={17}/></Button>
           </section>
@@ -893,7 +915,7 @@ function OfferCountdown({ expiresAt, label, secLabel }: { expiresAt: string | nu
 
 function Professional({ profile, categories }: { profile: Profile; categories: Category[] }) {
   const { t, locale } = useI18n()
-  const [provider, setProvider] = useState<{ estado_verificacion: string; online: boolean; bio: string | null; ciudad_base: string | null; categoria_principal_id: string | null; experiencia_anos: number | null; especialidades: string | null; tarifa_base: number | null; foto_url: string | null } | null>(null)
+  const [provider, setProvider] = useState<{ estado_verificacion: string; online: boolean; bio: string | null; ciudad_base: string | null; categoria_principal_id: string | null; experiencia_anos: number | null; especialidades: string | null; tarifa_base: number | null } | null>(null)
   const [fotoUrl, setFotoUrl] = useState<string | null>(null)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -921,6 +943,46 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
   const [unavailableDates, setUnavailableDates] = useState<string[]>([])
   const [calYear, setCalYear] = useState(() => new Date().getFullYear())
   const [calMonth, setCalMonth] = useState(() => new Date().getMonth())
+  const [portfolio, setPortfolio] = useState<{ id: string; url: string; title: string; date: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem(`ugo-pro-portfolio-${profile.id}`)
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const [newPhotoTitle, setNewPhotoTitle] = useState('')
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`ugo-pro-portfolio-${profile.id}`, JSON.stringify(portfolio))
+    } catch {}
+  }, [portfolio, profile.id])
+
+  async function uploadPortfolioPhoto(file: File | undefined, title: string) {
+    if (!file) return
+    if (!file.type.startsWith('image/') || file.size > 8_000_000) { setError('Imagem inválida ou muito grande (máx 8MB)'); return }
+    setBusy(true); setError('')
+    try {
+      const ext = file.type.includes('png') ? 'png' : 'jpg'
+      const path = `${profile.id}/portfolio-${Date.now()}.${ext}`
+      const { error: uploadError } = await db.storage.from('provider-kyc').upload(path, file, { upsert: true, contentType: file.type })
+      if (uploadError) throw uploadError
+      const { data: { publicUrl } } = db.storage.from('provider-kyc').getPublicUrl(path)
+      const newItem = { id: crypto.randomUUID(), url: publicUrl, title: title.trim() || 'Projeto', date: new Date().toISOString() }
+      setPortfolio(prev => [newItem, ...prev])
+      setNewPhotoTitle('')
+      setMessage(t('saved'))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function deletePortfolioPhoto(id: string) {
+    setPortfolio(prev => prev.filter(item => item.id !== id))
+  }
 
   useEffect(() => {
     try {
@@ -994,9 +1056,8 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
       const { error: uploadError } = await db.storage.from('provider-kyc').upload(path, file, { upsert: true, contentType: file.type })
       if (uploadError) throw uploadError
       const { data: { publicUrl } } = db.storage.from('provider-kyc').getPublicUrl(path)
-      const { error: updateError } = await db.from('perfiles_proveedor').update({ foto_url: publicUrl }).eq('usuario_id', profile.id)
-      if (updateError) throw updateError
       setFotoUrl(publicUrl)
+      try { localStorage.setItem(`ugo-pro-foto-${profile.id}`, publicUrl) } catch {}
       setMessage(t('saved'))
     } catch (e) {
       setError(errorMessage(e))
@@ -1062,7 +1123,7 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
   const load = useCallback(async () => {
     setLoading(true); setError('')
     const [p, o, j] = await Promise.all([
-      db.from('perfiles_proveedor').select('estado_verificacion,online,bio,ciudad_base,categoria_principal_id,experiencia_anos,especialidades,tarifa_base,foto_url').eq('usuario_id', profile.id).maybeSingle(),
+      db.from('perfiles_proveedor').select('estado_verificacion,online,bio,ciudad_base,categoria_principal_id,experiencia_anos,especialidades,tarifa_base').eq('usuario_id', profile.id).maybeSingle(),
       db.rpc('obtener_ofertas_proveedor'),
       db.from('servicios').select('id,numero,cliente_id,proveedor_id,categoria_id,descripcion,direccion_cliente,estado,tarifa,created_at,programado_para').eq('proveedor_id', profile.id).order('created_at', { ascending: false }).limit(50)
     ])
@@ -1075,7 +1136,11 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
       setExperience(String(p.data.experiencia_anos ?? ''))
       setSpecialties(p.data.especialidades || '')
       setRate(String(p.data.tarifa_base ?? ''))
-      setFotoUrl(p.data.foto_url || null)
+      try {
+        setFotoUrl(localStorage.getItem(`ugo-pro-foto-${profile.id}`) || null)
+      } catch {
+        setFotoUrl(null)
+      }
     }
     const { data: docs } = await db.from('documentos').select('id').eq('usuario_id', profile.id).eq('tipo', 'identidad_frente').in('estado', ['pendiente','procesando','aprobado']).limit(1)
     setHasDoc(!!docs?.length)
@@ -1300,6 +1365,45 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
             <label>{t('baseRate')}<input type="number" required value={rate} onChange={e => setRate(e.target.value)} min={1} step="0.01"/></label>
             <Button type="submit" disabled={busy || !provider}>{t('save')} <ArrowRight size={16}/></Button>
           </form>
+
+          <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <h3 style={{ fontSize: 15, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Camera size={18} /> {t('portfolioGallery')}
+            </h3>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+              Adicione fotos de trabalhos anteriores para que os clientes vejam seu histórico e qualidade.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8, marginBottom: 12 }}>
+              {portfolio.map(item => (
+                <div key={item.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #cbd5e1', background: '#fff' }} title={item.title}>
+                  <img src={item.url} alt={item.title || 'Projeto'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <button
+                    type="button"
+                    onClick={() => deletePortfolioPhoto(item.id)}
+                    style={{ position: 'absolute', top: 3, right: 3, background: 'rgba(0,0,0,0.7)', color: '#fff', border: 'none', borderRadius: '50%', width: 20, height: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Excluir"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                type="text"
+                placeholder={t('projectTitle')}
+                value={newPhotoTitle}
+                onChange={e => setNewPhotoTitle(e.target.value)}
+                style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 12, borderRadius: 6, border: '1px solid #cbd5e1' }}
+              />
+              <label className="btn btn-dark" style={{ fontSize: 12, padding: '6px 12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', margin: 0 }}>
+                <Camera size={14} style={{ marginRight: 4 }} /> {t('addPhoto')}
+                <input type="file" accept="image/*" onChange={e => void uploadPortfolioPhoto(e.target.files?.[0], newPhotoTitle)} style={{ display: 'none' }} />
+              </label>
+            </div>
+          </div>
 
           <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
             <h3 style={{ fontSize: 15, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
