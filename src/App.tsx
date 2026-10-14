@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, lazy, Suspense, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, ArrowUpRight, BadgeCheck, BriefcaseBusiness, CalendarDays, Check, CheckCircle2, ChevronDown, Clock, Compass, Crosshair, Download, Heart, LogOut, MapPin, Menu, MessageCircle, Search, ShieldCheck, Smartphone, Sparkles, Star, UserRound, X } from 'lucide-react'
+import { useCallback, useEffect, useState, useRef, lazy, Suspense, type FormEvent, type ReactNode } from 'react'
+import { ArrowRight, ArrowUpRight, BadgeCheck, BriefcaseBusiness, CalendarDays, Camera, Check, CheckCircle2, ChevronDown, Clock, Compass, Crosshair, Download, Heart, LogOut, MapPin, Menu, MessageCircle, Search, ShieldCheck, Smartphone, Sparkles, Star, UserRound, X } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { db, coordinates, date, errorMessage, money, type Profile, type Category, type Provider, type Service, type Offer } from './lib'
 import { useI18n, type Key, type Locale } from './i18n'
@@ -13,7 +13,7 @@ function currentPage(): Page { const h = location.hash.slice(2); return pages.in
 const nav = (p: Page) => { location.hash = `/${p}` }
 function usePage() { const [page, setPage] = useState<Page>(currentPage); useEffect(() => { const onHash = () => { setPage(currentPage()); window.scrollTo(0, 0) }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash) }, []); return page }
 function Notice({ text, error = false }: { text: string; error?: boolean }) { return text ? <p className={error ? 'notice error' : 'notice'} role={error ? 'alert' : 'status'}>{text}</p> : null }
-function Button({ children, onClick, variant = 'dark', disabled, type = 'button' }: { children: ReactNode; onClick?: () => void; variant?: 'dark' | 'light' | 'outline'; disabled?: boolean; type?: 'button' | 'submit' }) { return <button type={type} disabled={disabled} onClick={onClick} className={`btn btn-${variant}`}>{children}</button> }
+function Button({ children, onClick, variant = 'dark', disabled, type = 'button', style }: { children: ReactNode; onClick?: () => void; variant?: 'dark' | 'light' | 'outline'; disabled?: boolean; type?: 'button' | 'submit'; style?: React.CSSProperties }) { return <button type={type} disabled={disabled} onClick={onClick} style={style} className={`btn btn-${variant}`}>{children}</button> }
 function Heading({ kicker, title, subtitle }: { kicker: string; title: string; subtitle?: string }) { return <div className="section-heading"><div className="eyebrow">{kicker}</div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div> }
 
 interface BeforeInstallPromptEvent extends Event {
@@ -799,7 +799,11 @@ function OfferCountdown({ expiresAt, label, secLabel }: { expiresAt: string | nu
 
 function Professional({ profile, categories }: { profile: Profile; categories: Category[] }) {
   const { t, locale } = useI18n()
-  const [provider, setProvider] = useState<{ estado_verificacion: string; online: boolean; bio: string | null; ciudad_base: string | null; categoria_principal_id: string | null; experiencia_anos: number | null; especialidades: string | null; tarifa_base: number | null } | null>(null)
+  const [provider, setProvider] = useState<{ estado_verificacion: string; online: boolean; bio: string | null; ciudad_base: string | null; categoria_principal_id: string | null; experiencia_anos: number | null; especialidades: string | null; tarifa_base: number | null; foto_url: string | null } | null>(null)
+  const [fotoUrl, setFotoUrl] = useState<string | null>(null)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [stream, setStream] = useState<MediaStream | null>(null)
   const [offers, setOffers] = useState<Offer[]>([])
   const [jobs, setJobs] = useState<Service[]>([])
   const [bio, setBio] = useState('')
@@ -817,11 +821,122 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
+  )
+
+  async function requestNotificationPermission() {
+    if (!('Notification' in window)) return
+    const res = await Notification.requestPermission()
+    setNotifPermission(res)
+    if (res === 'granted') {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready
+        reg.showNotification('UGO Pro', { body: t('notifActive'), icon: '/ugo-platform/pwa-192x192.png' })
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (notifPermission === 'granted' && offers.length > 0) {
+      const lastOfferId = localStorage.getItem(`ugo_last_notified_offer_${profile.id}`)
+      const newest = offers[0]
+      if (newest && newest.id !== lastOfferId) {
+        localStorage.setItem(`ugo_last_notified_offer_${profile.id}`, newest.id)
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification(t('notifTitle'), {
+              body: `${newest.servicio?.descripcion || 'Novo pedido'} · ${newest.servicio?.zona_cliente || ''} (${money(newest.tarifa_ofrecida, locale)})`,
+              icon: '/ugo-platform/pwa-192x192.png',
+              badge: '/ugo-platform/icon.svg',
+              tag: `ugo-offer-${newest.id}`,
+              data: { url: window.location.href }
+            })
+          })
+        }
+      }
+    }
+  }, [offers, notifPermission, profile.id, locale, t])
+
+  async function uploadPhoto(file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/') || file.size > 8_000_000) { setError('Imagem inválida ou muito grande (máx 8MB)'); return }
+    setBusy(true); setError('')
+    try {
+      const ext = file.type.includes('png') ? 'png' : 'jpg'
+      const path = `${profile.id}/perfil-${Date.now()}.${ext}`
+      const { error: uploadError } = await db.storage.from('provider-kyc').upload(path, file, { upsert: true, contentType: file.type })
+      if (uploadError) throw uploadError
+      const { data: { publicUrl } } = db.storage.from('provider-kyc').getPublicUrl(path)
+      const { error: updateError } = await db.from('perfiles_proveedor').update({ foto_url: publicUrl }).eq('usuario_id', profile.id)
+      if (updateError) throw updateError
+      setFotoUrl(publicUrl)
+      setMessage(t('saved'))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function startCamera() {
+    setError('')
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('API de Câmera não suportada neste navegador.')
+      }
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+      setStream(s)
+      setIsCameraOpen(true)
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = s
+        }
+      }, 150)
+    } catch (e) {
+      setError(errorMessage(e))
+    }
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop())
+      setStream(null)
+    }
+    setIsCameraOpen(false)
+  }
+
+  function captureSnapshot() {
+    if (!videoRef.current) return
+    const video = videoRef.current
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 640
+    canvas.height = video.videoHeight || 480
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    canvas.toBlob(blob => {
+      if (blob) {
+        const file = new File([blob], `cam-${Date.now()}.jpg`, { type: 'image/jpeg' })
+        void uploadPhoto(file)
+      }
+      stopCamera()
+    }, 'image/jpeg', 0.9)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop())
+      }
+    }
+  }, [stream])
+
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     const [p, o, j] = await Promise.all([
-      db.from('perfiles_proveedor').select('estado_verificacion,online,bio,ciudad_base,categoria_principal_id,experiencia_anos,especialidades,tarifa_base').eq('usuario_id', profile.id).maybeSingle(),
+      db.from('perfiles_proveedor').select('estado_verificacion,online,bio,ciudad_base,categoria_principal_id,experiencia_anos,especialidades,tarifa_base,foto_url').eq('usuario_id', profile.id).maybeSingle(),
       db.rpc('obtener_ofertas_proveedor'),
       db.from('servicios').select('id,numero,cliente_id,proveedor_id,categoria_id,descripcion,direccion_cliente,estado,tarifa,created_at,programado_para').eq('proveedor_id', profile.id).order('created_at', { ascending: false }).limit(50)
     ])
@@ -834,6 +949,7 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
       setExperience(String(p.data.experiencia_anos ?? ''))
       setSpecialties(p.data.especialidades || '')
       setRate(String(p.data.tarifa_base ?? ''))
+      setFotoUrl(p.data.foto_url || null)
     }
     const { data: docs } = await db.from('documentos').select('id').eq('usuario_id', profile.id).eq('tipo', 'identidad_frente').in('estado', ['pendiente','procesando','aprobado']).limit(1)
     setHasDoc(!!docs?.length)
@@ -964,6 +1080,23 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
 
           <section className="panel">
             <div className="panel-head">
+              <div><span className="eyebrow">🔔 Notificações</span><h2>{t('notifTitle')}</h2></div>
+              <span className={`status-pill ${notifPermission === 'granted' ? 'status-active' : ''}`}>
+                {notifPermission === 'granted' ? t('notifActive') : notifPermission === 'denied' ? t('notifBlocked') : 'Desativadas'}
+              </span>
+            </div>
+            <p className="muted">{t('notifDesc')}</p>
+            {notifPermission !== 'granted' ? (
+              <Button onClick={() => void requestNotificationPermission()}>
+                {t('notifBtn')}
+              </Button>
+            ) : (
+              <p className="subtle" style={{ color: '#16a34a', fontWeight: 500 }}>✓ {t('notifActive')}</p>
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
               <div><span className="eyebrow">02 / UGO</span><h2>{t('offers')}</h2></div>
               <span className="count-badge">{offers.length}</span>
             </div>
@@ -1009,6 +1142,29 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
         <aside className="panel pro-profile">
           <div className="eyebrow">04 / PERFIL</div>
           <h2>{t('proProfile')}</h2>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, padding: 12, background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#cbd5e1', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {fotoUrl ? (
+                <img src={fotoUrl} alt={profile.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <UserRound size={32} color="#64748b" />
+              )}
+            </div>
+            <div style={{ flex: 1 }}>
+              <strong style={{ display: 'block', fontSize: 14, marginBottom: 4 }}>{t('profilePhoto')}</strong>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Button variant="outline" onClick={() => void startCamera()} style={{ fontSize: 12, padding: '6px 10px' }}>
+                  <Camera size={14} style={{ marginRight: 4 }}/> {t('takePhoto')}
+                </Button>
+                <label className="btn btn-outline" style={{ fontSize: 12, padding: '6px 10px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', margin: 0 }}>
+                  <Smartphone size={14} style={{ marginRight: 4 }}/> {t('uploadPhoto')}
+                  <input type="file" accept="image/*" capture="user" onChange={e => void uploadPhoto(e.target.files?.[0])} style={{ display: 'none' }} />
+                </label>
+              </div>
+            </div>
+          </div>
+
           <form onSubmit={save}>
             <label>{t('bio')}<textarea value={bio} onChange={e => setBio(e.target.value)} maxLength={800} rows={4}/></label>
             <label>{t('baseCity')}<input value={city} onChange={e => setCity(e.target.value)} maxLength={100}/></label>
@@ -1033,6 +1189,25 @@ function Professional({ profile, categories }: { profile: Profile; categories: C
           )}
         </aside>
       </div>
+
+      {isCameraOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#1e293b', padding: 20, borderRadius: 16, maxWidth: 480, width: '100%', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)' }}>
+            <h3 style={{ color: '#fff', marginBottom: 16, fontSize: 18 }}>{t('takePhoto')}</h3>
+            <div style={{ position: 'relative', width: '100%', aspectRatio: '4/3', background: '#000', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+              <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <Button onClick={captureSnapshot} style={{ background: '#16a34a', color: '#fff' }}>
+                <Camera size={16} style={{ marginRight: 6 }}/> {t('capture')}
+              </Button>
+              <Button variant="outline" onClick={stopCamera} style={{ color: '#fff', borderColor: '#475569' }}>
+                {t('cancel')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
