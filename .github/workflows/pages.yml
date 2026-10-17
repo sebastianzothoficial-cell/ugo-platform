@@ -1,7 +1,9 @@
 name: Build and deploy UGO
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - arena/25d44ee4-ugo-platform
   workflow_dispatch:
   pull_request:
     branches: [main]
