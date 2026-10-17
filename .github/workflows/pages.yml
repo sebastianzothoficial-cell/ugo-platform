@@ -1,4 +1,4 @@
-name: Build and deploy UGO
+name: Build and deploy UGO Platform
 on:
   push:
     branches: [main]
