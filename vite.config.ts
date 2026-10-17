@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'push-sw.js', 'notificationclick-handler.js'],
       manifest: {
         id: '/ugo-platform/',
         name: 'UGO Platform',
@@ -41,7 +41,10 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // The generated worker is the active registration when push-sw.js is not in control, so it
+        // needs the tap handler too; the file ships from public/ (not bundled, not precached).
+        importScripts: ['notificationclick-handler.js']
       },
       devOptions: {
         enabled: true,
